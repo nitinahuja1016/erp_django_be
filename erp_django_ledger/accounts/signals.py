@@ -81,3 +81,96 @@ def update_product_stock_on_delete(sender, instance, **kwargs):
     product.save()
 
 
+@receiver(pre_save, sender = Transaction)
+def cache_old_transaction(sender, instance, **kwards):
+    if instance.pk:
+        try:
+            old_instance = Transaction.objects.get(pk = instance.pk)
+            instance._old_amount = old_instance.amount
+            instance._old_type = old_instance.transaction_type
+            instance._old_accont_id = old_instance.account_id
+        except Transaction.DoesNotExist:
+            instance._old_amount = None
+            instance._old_type = None
+            instance._old_accont_id = None
+    else:
+        instance._old_amount = None
+        instance._old_type = None
+        instance._old_accont_id = None
+
+    
+@receiver(post_save, sender = Transaction)
+def update_account_balance_on_save(sender, instance, created, **kwargs):
+    account = instance.account
+    amount= instance.amount
+    transaction_type = instance.transaction_type
+
+    if created:
+        if transaction_type == 'dr':
+            account.balance -= amount
+        else: 
+            account.balance += amount
+        account.save()
+    else:
+        #reverse old transaction, apply new one
+        old_amount = getattr(instance, '_old_amount',None)
+        old_type = getattr(instance, '_old_type',None)
+        old_account_id = getattr(instance, '_old_account_id',None)
+
+        if old_account_id and old_account_id != account.id:
+            #Transaciton moved to another accouct: revert old,
+            old_account = Account.objects.get(id = old_account_id)
+            if old_type == 'dr':
+                old_account.balance += old_amount
+            else: 
+                old_account.balance -+ old_amount
+            old_account.save()
+
+            #giving effect to new account
+            if transaction_type == 'dr':
+                account.balance -= amount
+            else:
+                account.balacne += amount
+            account.save()
+        else:
+            #same account, reverse and apply, alternatively, take difference but that will be complex if it changes type.
+
+            #Reverse
+            if old_type == 'dr':
+                account.balance += old_amount
+            else:
+                account.balance -= old_amount
+            
+            #new effect
+            if transaction_type == 'dr':
+                account.balance -= amount
+            else:
+                account.balance += amount
+
+            account.save()
+
+
+@receiver(post_delete,sender = Transaction)
+def update_account_balance_on_delete(sender, instance, **kwargs):
+    account = instance.account
+    amount = instance.amount
+    transaction_type = instance.transaction_type
+
+    if transaction_type == 'dr':
+        account.balance += amount
+    else:
+        account.balance -= amount
+    account.save()
+
+
+
+
+
+
+
+
+
+
+    
+
+
